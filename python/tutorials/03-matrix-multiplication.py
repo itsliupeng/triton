@@ -441,4 +441,6 @@ def benchmark(M, N, K, provider, fp8_inputs):
     return perf(ms), perf(max_ms), perf(min_ms)
 
 
-benchmark.run(show_plots=True, print_data=True)
+
+if __name__ == "__main__":
+    benchmark.run(show_plots=True, print_data=True)

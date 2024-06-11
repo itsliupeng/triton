@@ -125,6 +125,14 @@ def _attn_fwd(Q, K, V, sm_scale, M, Out,  #
         block_shape=(BLOCK_M, HEAD_DIM),
         order=(1, 0),
     )
+    K_block_ptr = tl.make_block_ptr(
+        base=K + qvk_offset,
+        shape=(HEAD_DIM, N_CTX),
+        strides=(stride_kk, stride_kn),
+        offsets=(0, 0),
+        block_shape=(HEAD_DIM, BLOCK_N),
+        order=(0, 1),
+    )
     v_order: tl.constexpr = (0, 1) if V.dtype.element_ty == tl.float8e5 else (1, 0)
     V_block_ptr = tl.make_block_ptr(
         base=V + qvk_offset,
@@ -133,14 +141,6 @@ def _attn_fwd(Q, K, V, sm_scale, M, Out,  #
         offsets=(0, 0),
         block_shape=(BLOCK_N, HEAD_DIM),
         order=v_order,
-    )
-    K_block_ptr = tl.make_block_ptr(
-        base=K + qvk_offset,
-        shape=(HEAD_DIM, N_CTX),
-        strides=(stride_kk, stride_kn),
-        offsets=(0, 0),
-        block_shape=(HEAD_DIM, BLOCK_N),
-        order=(0, 1),
     )
     O_block_ptr = tl.make_block_ptr(
         base=Out + qvk_offset,
@@ -234,7 +234,7 @@ except BaseException:
 
 # TORCH_HAS_FP8 = hasattr(torch, 'float8_e5m2')
 TORCH_HAS_FP8 = False
-BATCH, N_HEADS, HEAD_DIM = 8, 32, 128
+BATCH, N_HEADS, HEAD_DIM = 8, 32, 256
 # vary seq length for fixed head and batch=4
 configs = []
 for mode in ["fwd"]:
@@ -242,7 +242,7 @@ for mode in ["fwd"]:
         configs.append(
             triton.testing.Benchmark(
                 x_names=["N_CTX"],
-                x_vals=[2**i for i in range(8, 13)],
+                x_vals=[2**i for i in range(5, 16)],
                 line_arg="provider",
                 line_vals=["triton-fp16"] + (["triton-fp8"] if TORCH_HAS_FP8 else []) +
                 (["flash"] if HAS_FLASH else []),
@@ -271,6 +271,11 @@ def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, causal, mode, provider, dev
         q = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda", requires_grad=True)
         k = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda", requires_grad=True)
         v = torch.randn((BATCH, H, N_CTX, HEAD_DIM), dtype=dtype, device="cuda", requires_grad=True)
+        
+        # to [B, S, N, H]
+        # q, k, v = q.permute(0, 2, 1, 3), k.permute(0, 2, 1, 3), v.permute(0, 2, 1, 3)
+        
+        
         if mode == "fwd" and "fp8" in provider:
             q = q.to(torch.float8_e5m2)
             k = k.to(torch.float8_e5m2)
